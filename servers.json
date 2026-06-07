@@ -4,7 +4,29 @@
     "host": "192.168.1.100",
     "port": 22,
     "username": "root",
+    "password": null,
     "autostart": false,
-    "ark_path": "/home/ark/server"
+    "ark_path": "/home/ark/server",
+    "ssh_key_path": null,
+    "systemd_unit": null,
+    "map": null,
+    "ark_start_params": null,
+    "usersettings_path": null,
+    "usersettings_content": null
+  },
+  {
+    "name": "New ARK Pre-Aquatic Server",
+    "host": "127.0.0.1",
+    "port": 22,
+    "username": "ark",
+    "password": null,
+    "autostart": false,
+    "ark_path": "/home/ark/server",
+    "ssh_key_path": null,
+    "systemd_unit": null,
+    "map": "TheIsland_P",
+    "ark_start_params": "-server -log -noBattlEye",
+    "usersettings_path": "\\home\\ark\\server\\ShooterGame\\Saved\\Config\\LinuxServer\\GameUserSettings.ini",
+    "usersettings_content": "[ServerSettings]\nmaxplayers = 69\nplayerdamagemultiplier = 0.8\ndinocountmultiplier = 1.0\nharvestamountmultiplier = 1.0\nstructuredamagemultiplier = 1.0"
   }
 ]

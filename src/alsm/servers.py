@@ -14,11 +14,14 @@ class Server:
     autostart: bool = False
     ark_path: Optional[str] = None
     ssh_key_path: Optional[str] = None
+    rcon_port: Optional[int] = 27020
+    rcon_password: Optional[str] = None
     systemd_unit: Optional[str] = None
     map: Optional[str] = None
     ark_start_params: Optional[str] = None
     usersettings_path: Optional[str] = None
     usersettings_content: Optional[str] = None
+    mods: Optional[List[str]] = None
 
     def to_dict(self):
         return asdict(self)
@@ -34,11 +37,14 @@ class Server:
             autostart=bool(d.get("autostart", False)),
             ark_path=d.get("ark_path"),
             ssh_key_path=d.get("ssh_key_path"),
+            rcon_port=int(d.get("rcon_port", 27020)) if d.get("rcon_port") else 27020,
+            rcon_password=d.get("rcon_password"),
             systemd_unit=d.get("systemd_unit"),
             map=d.get("map"),
             ark_start_params=d.get("ark_start_params"),
             usersettings_path=d.get("usersettings_path"),
             usersettings_content=d.get("usersettings_content"),
+            mods=d.get("mods"),
         )
 
 

@@ -37,11 +37,12 @@ if HAVE_QT:
         def __init__(self, title, parent=None):
             super().__init__(parent)
             self.toggle = QPushButton(title)
+            # Make the section expandable and default to expanded so settings are visible
             self.toggle.setCheckable(True)
-            self.toggle.setChecked(False)
-            self.toggle.setFlat(True)
+            self.toggle.setChecked(True)
+            self.toggle.setFlat(False)
             self.content = QWidget(self)
-            self.content.setVisible(False)
+            self.content.setVisible(True)
             self.main = QVBoxLayout(self)
             self.main.setContentsMargins(0, 0, 0, 0)
             self.main.addWidget(self.toggle)
@@ -86,27 +87,42 @@ if HAVE_QT:
         def __init__(self, parent=None, server=None):
             super().__init__(parent)
             self.setWindowTitle('Server Editor')
-            layout = QFormLayout(self)
+            # Use a scrollable form so fields remain accessible on small screens
+            outer = QVBoxLayout(self)
+            scroll = QScrollArea(self)
+            scroll.setWidgetResizable(True)
+            form_container = QWidget(self)
+            content_layout = QFormLayout(form_container)
+            scroll.setWidget(form_container)
+            outer.addWidget(scroll)
             self.name = QLineEdit(self)
-            layout.addRow('Name:', self.name)
+            content_layout.addRow('Name:', self.name)
             self.host = QLineEdit(self)
-            layout.addRow('Host:', self.host)
+            content_layout.addRow('Host:', self.host)
             self.port = QSpinBox(self)
             self.port.setRange(1, 65535)
             self.port.setValue(22)
-            layout.addRow('Port:', self.port)
+            content_layout.addRow('Port:', self.port)
             self.username = QLineEdit(self)
-            layout.addRow('Username:', self.username)
+            content_layout.addRow('Username:', self.username)
             self.ssh_key = QLineEdit(self)
-            layout.addRow('SSH key path:', self.ssh_key)
+            content_layout.addRow('SSH key path:', self.ssh_key)
             self.ssh_browse = QPushButton('Browse...', self)
             self.ssh_browse.clicked.connect(self.browse_key)
-            layout.addRow(self.ssh_browse)
+            content_layout.addRow(self.ssh_browse)
+            # RCON settings
+            self.rcon_port = QSpinBox(self)
+            self.rcon_port.setRange(1, 65535)
+            self.rcon_port.setValue(27020)
+            content_layout.addRow('RCON port:', self.rcon_port)
+            self.rcon_password = QLineEdit(self)
+            self.rcon_password.setEchoMode(QLineEdit.EchoMode.Password)
+            content_layout.addRow('RCON password:', self.rcon_password)
             self.usersettings_path = QLineEdit(self)
-            layout.addRow('User settings INI path:', self.usersettings_path)
+            content_layout.addRow('User settings INI path:', self.usersettings_path)
             self.usersettings_browse = QPushButton('Browse...', self)
             self.usersettings_browse.clicked.connect(self.browse_usersettings)
-            layout.addRow(self.usersettings_browse)
+            content_layout.addRow(self.usersettings_browse)
             # Preset selector
             try:
                 from src.alsm.ini_templates import load_presets, preset_to_ini_text, save_preset
@@ -121,37 +137,53 @@ if HAVE_QT:
             self._refresh_presets = lambda: self._load_preset_items(load_presets)
             self._refresh_presets()
             self.apply_preset_btn = QPushButton('Aplicar preset', self)
-            self.apply_preset_btn.clicked.connect(lambda: self.apply_preset(preset_to_ini_text(self.preset_combo.currentText())))
+            self.apply_preset_btn.clicked.connect(lambda: self.apply_preset_by_name(self.preset_combo.currentText()))
             self.save_preset_btn = QPushButton('Guardar preset', self)
             self.save_preset_btn.clicked.connect(lambda: self.save_current_preset(save_preset))
-            layout.addRow(self.preset_combo, self.apply_preset_btn)
-            layout.addRow(self.save_preset_btn)
+            content_layout.addRow(self.preset_combo, self.apply_preset_btn)
+            content_layout.addRow(self.save_preset_btn)
             self.usersettings_content = QTextEdit(self)
             self.usersettings_content.setPlaceholderText('Optional contents of userserverettings.ini\n(you can leave blank and provide path only)')
-            layout.addRow('INI content:', self.usersettings_content)
+            content_layout.addRow('INI content:', self.usersettings_content)
+            # Game.ini support (per-species / class overrides)
+            self.gameini_path = QLineEdit(self)
+            content_layout.addRow('Game.ini path:', self.gameini_path)
+            self.gameini_content = QTextEdit(self)
+            self.gameini_content.setAcceptRichText(False)
+            self.gameini_content.setPlaceholderText('[Game.ini] Per-class overrides and settings')
+            content_layout.addRow('Game.ini content:', self.gameini_content)
+            # Mods (Workshop IDs) - one per line
+            self.mods_list = QTextEdit(self)
+            self.mods_list.setAcceptRichText(False)
+            self.mods_list.setPlaceholderText('One Steam Workshop ID per line (e.g. 123456789)')
+            content_layout.addRow('Mods (Workshop IDs):', self.mods_list)
+            # SFTP upload button for directory sync
+            self.sftp_upload_btn = QPushButton('Upload folder via SFTP', self)
+            self.sftp_upload_btn.clicked.connect(self.on_sftp_upload)
+            content_layout.addRow(self.sftp_upload_btn)
             self.parse_btn = QPushButton('Parse INI', self)
             self.parse_btn.clicked.connect(self.parse_ini)
             self.serialize_btn = QPushButton('Serialize fields -> INI', self)
             self.serialize_btn.clicked.connect(self.serialize_from_fields)
-            layout.addRow(self.parse_btn, self.serialize_btn)
+            content_layout.addRow(self.parse_btn, self.serialize_btn)
             self.ini_area = QScrollArea(self)
             self.ini_container = QWidget(self)
             self.ini_layout = QVBoxLayout(self.ini_container)
             self.ini_area.setWidgetResizable(True)
             self.ini_area.setWidget(self.ini_container)
-            layout.addRow(self.ini_area)
+            content_layout.addRow(self.ini_area)
             self.write_ini_on_save = QCheckBox('Write INI file to path on save', self)
-            layout.addRow(self.write_ini_on_save)
+            content_layout.addRow(self.write_ini_on_save)
             self.ark_path = QLineEdit(self)
-            layout.addRow('ARK path:', self.ark_path)
+            content_layout.addRow('ARK path:', self.ark_path)
             self.map = QLineEdit(self)
-            layout.addRow('Map:', self.map)
+            content_layout.addRow('Map:', self.map)
             self.systemd_unit = QLineEdit(self)
-            layout.addRow('systemd unit:', self.systemd_unit)
+            content_layout.addRow('systemd unit:', self.systemd_unit)
             self.ark_start_params = QLineEdit(self)
-            layout.addRow('Start params:', self.ark_start_params)
+            content_layout.addRow('Start params:', self.ark_start_params)
             self.autostart = QCheckBox(self)
-            layout.addRow('Autostart:', self.autostart)
+            content_layout.addRow('Autostart:', self.autostart)
             # Extra accordion sections for ASM-like settings
             self.extra_settings = {}
             # Player settings
@@ -167,9 +199,58 @@ if HAVE_QT:
             self.player_damage.setValue(1.0)
             pl_sec.addWidget(QLabel('PlayerDamageMultiplier:'))
             pl_sec.addWidget(self.player_damage)
-            layout.addRow(pl_sec)
+            # More player-specific multipliers (ASM-like)
+            self.player_stamina = QDoubleSpinBox(self)
+            self.player_stamina.setRange(0.1, 10.0)
+            self.player_stamina.setSingleStep(0.1)
+            self.player_stamina.setValue(1.0)
+            pl_sec.addWidget(QLabel('PlayerStaminaDrainMultiplier:'))
+            pl_sec.addWidget(self.player_stamina)
+
+            self.player_weight = QDoubleSpinBox(self)
+            self.player_weight.setRange(0.1, 10.0)
+            self.player_weight.setSingleStep(0.1)
+            self.player_weight.setValue(1.0)
+            pl_sec.addWidget(QLabel('PlayerWeightMultiplier:'))
+            pl_sec.addWidget(self.player_weight)
+
+            self.player_torpor = QDoubleSpinBox(self)
+            self.player_torpor.setRange(0.1, 10.0)
+            self.player_torpor.setSingleStep(0.1)
+            self.player_torpor.setValue(1.0)
+            pl_sec.addWidget(QLabel('PlayerTorporDrainMultiplier:'))
+            pl_sec.addWidget(self.player_torpor)
+
+            self.player_food = QDoubleSpinBox(self)
+            self.player_food.setRange(0.1, 10.0)
+            self.player_food.setSingleStep(0.1)
+            self.player_food.setValue(1.0)
+            pl_sec.addWidget(QLabel('PlayerFoodDrainMultiplier:'))
+            pl_sec.addWidget(self.player_food)
+
+            self.player_water = QDoubleSpinBox(self)
+            self.player_water.setRange(0.1, 10.0)
+            self.player_water.setSingleStep(0.1)
+            self.player_water.setValue(1.0)
+            pl_sec.addWidget(QLabel('PlayerWaterDrainMultiplier:'))
+            pl_sec.addWidget(self.player_water)
+
+            self.player_xp = QDoubleSpinBox(self)
+            self.player_xp.setRange(0.01, 100.0)
+            self.player_xp.setSingleStep(0.1)
+            self.player_xp.setValue(1.0)
+            pl_sec.addWidget(QLabel('XPMultiplier:'))
+            pl_sec.addWidget(self.player_xp)
+            content_layout.addRow(pl_sec)
             self.extra_settings[('ServerSettings', 'MaxPlayers')] = self.maxplayers2
             self.extra_settings[('ServerSettings', 'PlayerDamageMultiplier')] = self.player_damage
+            # register new player settings
+            self.extra_settings[('ServerSettings', 'PlayerCharacterStaminaDrainMultiplier')] = self.player_stamina
+            self.extra_settings[('ServerSettings', 'PlayerCharacterWeightMultiplier')] = self.player_weight
+            self.extra_settings[('ServerSettings', 'PlayerCharacterTorporDrainMultiplier')] = self.player_torpor
+            self.extra_settings[('ServerSettings', 'PlayerCharacterFoodDrainMultiplier')] = self.player_food
+            self.extra_settings[('ServerSettings', 'PlayerCharacterWaterDrainMultiplier')] = self.player_water
+            self.extra_settings[('ServerSettings', 'XPMultiplier')] = self.player_xp
             # Dino settings
             dino_sec = CollapsibleSection('Ajustes de dinos')
             self.dino_multiplier2 = QDoubleSpinBox(self)
@@ -178,8 +259,25 @@ if HAVE_QT:
             self.dino_multiplier2.setValue(1.0)
             dino_sec.addWidget(QLabel('DinoCountMultiplier:'))
             dino_sec.addWidget(self.dino_multiplier2)
-            layout.addRow(dino_sec)
+            # Additional dino-related multipliers
+            self.tamed_dino_damage = QDoubleSpinBox(self)
+            self.tamed_dino_damage.setRange(0.1, 10.0)
+            self.tamed_dino_damage.setSingleStep(0.1)
+            self.tamed_dino_damage.setValue(1.0)
+            dino_sec.addWidget(QLabel('TamedDinoDamageMultiplier:'))
+            dino_sec.addWidget(self.tamed_dino_damage)
+
+            self.tamed_dino_resistance = QDoubleSpinBox(self)
+            self.tamed_dino_resistance.setRange(0.1, 10.0)
+            self.tamed_dino_resistance.setSingleStep(0.1)
+            self.tamed_dino_resistance.setValue(1.0)
+            dino_sec.addWidget(QLabel('TamedDinoResistanceMultiplier:'))
+            dino_sec.addWidget(self.tamed_dino_resistance)
+
+            content_layout.addRow(dino_sec)
             self.extra_settings[('ServerSettings', 'DinoCountMultiplier')] = self.dino_multiplier2
+            self.extra_settings[('ServerSettings', 'TamedDinoDamageMultiplier')] = self.tamed_dino_damage
+            self.extra_settings[('ServerSettings', 'TamedDinoResistanceMultiplier')] = self.tamed_dino_resistance
             # Resources
             res_sec = CollapsibleSection('Recursos')
             self.resource_multiplier2 = QDoubleSpinBox(self)
@@ -188,8 +286,16 @@ if HAVE_QT:
             self.resource_multiplier2.setValue(1.0)
             res_sec.addWidget(QLabel('HarvestAmountMultiplier:'))
             res_sec.addWidget(self.resource_multiplier2)
-            layout.addRow(res_sec)
+            # Resource respawn/collection tweaks
+            self.resource_respawn = QDoubleSpinBox(self)
+            self.resource_respawn.setRange(0.01, 100.0)
+            self.resource_respawn.setSingleStep(0.1)
+            self.resource_respawn.setValue(1.0)
+            res_sec.addWidget(QLabel('ResourceRespawnPeriodMultiplier:'))
+            res_sec.addWidget(self.resource_respawn)
+            content_layout.addRow(res_sec)
             self.extra_settings[('ServerSettings', 'HarvestAmountMultiplier')] = self.resource_multiplier2
+            self.extra_settings[('ServerSettings', 'ResourceRespawnPeriodMultiplier')] = self.resource_respawn
             # Structures
             struct_sec = CollapsibleSection('Estructuras')
             self.structure_multiplier = QDoubleSpinBox(self)
@@ -198,12 +304,84 @@ if HAVE_QT:
             self.structure_multiplier.setValue(1.0)
             struct_sec.addWidget(QLabel('StructureDamageMultiplier:'))
             struct_sec.addWidget(self.structure_multiplier)
-            layout.addRow(struct_sec)
+            content_layout.addRow(struct_sec)
             self.extra_settings[('ServerSettings', 'StructureDamageMultiplier')] = self.structure_multiplier
+            # System / general settings
+            system_sec = CollapsibleSection('Sistema')
+            self.daycycle = QDoubleSpinBox(self)
+            self.daycycle.setRange(0.01, 100.0)
+            self.daycycle.setSingleStep(0.1)
+            self.daycycle.setValue(1.0)
+            system_sec.addWidget(QLabel('DayCycleSpeedScale:'))
+            system_sec.addWidget(self.daycycle)
+
+            self.nightcycle = QDoubleSpinBox(self)
+            self.nightcycle.setRange(0.01, 100.0)
+            self.nightcycle.setSingleStep(0.1)
+            self.nightcycle.setValue(1.0)
+            system_sec.addWidget(QLabel('NightTimeSpeedScale:'))
+            system_sec.addWidget(self.nightcycle)
+
+            self.allow_third = QCheckBox('AllowThirdPersonPlayer', self)
+            self.allow_third.setChecked(False)
+            system_sec.addWidget(self.allow_third)
+
+            self.disable_decay_pve = QCheckBox('DisableStructureDecayPvE', self)
+            self.disable_decay_pve.setChecked(True)
+            system_sec.addWidget(self.disable_decay_pve)
+
+            self.server_admin_pwd = QLineEdit(self)
+            self.server_admin_pwd.setEchoMode(QLineEdit.EchoMode.Normal)
+            system_sec.addWidget(QLabel('ServerAdminPassword:'))
+            system_sec.addWidget(self.server_admin_pwd)
+
+            content_layout.addRow(system_sec)
+            self.extra_settings[('ServerSettings', 'DayCycleSpeedScale')] = self.daycycle
+            self.extra_settings[('ServerSettings', 'NightTimeSpeedScale')] = self.nightcycle
+            self.extra_settings[('ServerSettings', 'AllowThirdPersonPlayer')] = self.allow_third
+            self.extra_settings[('ServerSettings', 'DisableStructureDecayPvE')] = self.disable_decay_pve
+            self.extra_settings[('ServerSettings', 'ServerAdminPassword')] = self.server_admin_pwd
+            # Auto-generate any remaining controls from asm_settings_map
+            try:
+                from src.alsm.asm_settings_map import SETTINGS_MAP
+                remaining = []
+                for key, meta in SETTINGS_MAP.get('ServerSettings', {}).items():
+                    if ('ServerSettings', key) in self.extra_settings:
+                        continue
+                    remaining.append((key, meta))
+                if remaining:
+                    more_sec = CollapsibleSection('Más ajustes')
+                    for key, meta in remaining:
+                        t = meta.get('type')
+                        if t == 'bool':
+                            w = QCheckBox(key, self)
+                            w.setChecked(False)
+                            more_sec.addWidget(w)
+                        elif t == 'int':
+                            w = QSpinBox(self)
+                            w.setRange(0, 10000)
+                            w.setValue(0)
+                            more_sec.addWidget(QLabel(f'{key}:'))
+                            more_sec.addWidget(w)
+                        elif t == 'double':
+                            w = QDoubleSpinBox(self)
+                            w.setRange(0.01, 100.0)
+                            w.setSingleStep(0.1)
+                            w.setValue(1.0)
+                            more_sec.addWidget(QLabel(f'{key}:'))
+                            more_sec.addWidget(w)
+                        else:
+                            w = QLineEdit(self)
+                            more_sec.addWidget(QLabel(f'{key}:'))
+                            more_sec.addWidget(w)
+                        self.extra_settings[('ServerSettings', key)] = w
+                    content_layout.addRow(more_sec)
+            except Exception:
+                pass
             buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
             buttons.accepted.connect(self.on_accept)
             buttons.rejected.connect(self.reject)
-            layout.addRow(buttons)
+            outer.addWidget(buttons)
             if server:
                 self.name.setText(getattr(server, 'name', ''))
                 self.host.setText(getattr(server, 'host', ''))
@@ -241,7 +419,46 @@ if HAVE_QT:
                 except Exception:
                     pass
 
+        def on_sftp_upload(self):
+            # choose local folder to upload
+            d = QFileDialog.getExistingDirectory(self, 'Select local folder to upload')
+            if not d:
+                return
+            # ask for remote path
+            from PyQt6.QtWidgets import QInputDialog
+            remote, ok = QInputDialog.getText(self, 'Remote folder', 'Remote folder path on server (e.g. /home/ark/server):')
+            if not ok or not remote:
+                return
+            # get server info from fields
+            host = self.host.text().strip()
+            port = int(self.port.value())
+            username = self.username.text().strip() or None
+            password = None
+            key = self.ssh_key.text().strip() or None
+            # ask for password if no key
+            if not key and username:
+                from PyQt6.QtWidgets import QInputDialog
+                pw, ok2 = QInputDialog.getText(self, 'SSH Password', f'Password for {username}@{host}', QLineEdit.EchoMode.Password)
+                if ok2 and pw:
+                    password = pw
+
+            from src.alsm import runner
+
+            def _cb(res):
+                ok2, msg = res
+                def _show():
+                    if ok2:
+                        QMessageBox.information(self, 'SFTP', 'Upload complete')
+                    else:
+                        QMessageBox.warning(self, 'SFTP', f'Upload failed: {msg}')
+                QTimer.singleShot(0, _show)
+
+            # run in thread
+            thr = runner.run_in_thread(runner.upload_dir_sftp, args=(host, port, username, password, d, remote, key), callback=_cb)
+            QMessageBox.information(self, 'SFTP', 'Upload started in background')
+
         def apply_preset(self, text: str):
+            # backward-compatible: apply raw INI text
             if not text:
                 QMessageBox.information(self, 'Preset', 'Preset vacío o no disponible')
                 return
@@ -250,6 +467,43 @@ if HAVE_QT:
                 self.parse_ini()
             except Exception:
                 pass
+
+        def apply_preset_by_name(self, name: str):
+            try:
+                from src.alsm.ini_templates import load_presets
+                presets = load_presets() or {}
+                preset = presets.get(name)
+                if not preset:
+                    # fallback to built-in helper
+                    try:
+                        from src.alsm.ini_templates import preset_to_ini_text
+                        text = preset_to_ini_text(name)
+                        return self.apply_preset(text)
+                    except Exception:
+                        QMessageBox.information(self, 'Preset', 'Preset no encontrado')
+                        return
+                # build usersettings INI text from preset dict sections
+                cfg = configparser.ConfigParser()
+                for section, items in preset.items():
+                    if isinstance(items, dict):
+                        cfg[section] = {}
+                        for k, v in items.items():
+                            cfg[section][k] = str(v)
+                from io import StringIO
+                s = StringIO()
+                cfg.write(s)
+                self.usersettings_content.setPlainText(s.getvalue())
+                # apply game.ini and mods if present
+                if isinstance(preset.get('gameini'), str):
+                    self.gameini_content.setPlainText(preset.get('gameini'))
+                if isinstance(preset.get('mods'), (list, tuple)):
+                    self.mods_list.setPlainText('\n'.join(map(str, preset.get('mods'))))
+                try:
+                    self.parse_ini()
+                except Exception:
+                    pass
+            except Exception:
+                QMessageBox.information(self, 'Preset', 'Error al aplicar preset')
 
         def _load_preset_items(self, load_fn):
             try:
@@ -278,6 +532,13 @@ if HAVE_QT:
                 preset = {}
                 for section in cfg.sections() or ['DEFAULT']:
                     preset[section] = dict(cfg[section])
+                # include Game.ini and mods if present
+                gi = self.gameini_content.toPlainText().strip()
+                if gi:
+                    preset['gameini'] = gi
+                mods = [s.strip() for s in self.mods_list.toPlainText().splitlines() if s.strip()]
+                if mods:
+                    preset['mods'] = mods
                 # ask for name
                 from PyQt6.QtWidgets import QInputDialog
                 name, ok = QInputDialog.getText(self, 'Guardar preset', 'Nombre del preset:')
@@ -446,7 +707,14 @@ if HAVE_QT:
                 'autostart': bool(self.autostart.isChecked()),
                 'usersettings_path': self.usersettings_path.text().strip() or None,
                 'usersettings_content': self.usersettings_content.toPlainText().strip() or None,
+                'gameini_path': self.gameini_path.text().strip() or None,
+                'gameini_content': self.gameini_content.toPlainText().strip() or None,
+                'mods': [s.strip() for s in self.mods_list.toPlainText().splitlines() if s.strip()],
+                'mods_raw': self.mods_list.toPlainText().strip() or None,
+                'rcon_port': int(self.rcon_port.value()),
+                'rcon_password': self.rcon_password.text().strip() or None,
                 'write_ini_on_save': bool(self.write_ini_on_save.isChecked()),
+                'write_gameini_on_save': bool(self.write_gameini_on_save.isChecked()),
             }
 
 
@@ -788,6 +1056,22 @@ if HAVE_QT:
                     except Exception as e:
                         self.status.setText(f'INI write failed: {e}')
                         QMessageBox.warning(self, 'INI Save Failed', str(e))
+                # Optionally write Game.ini
+                game_content = data.get('gameini_content')
+                game_path = data.get('gameini_path')
+                if not game_path and getattr(new, 'ark_path', None):
+                    gpdefault = Path(new.ark_path) / 'ShooterGame' / 'Saved' / 'Config' / 'LinuxServer' / 'Game.ini'
+                    game_path = str(gpdefault)
+                if data.get('write_gameini_on_save') and game_content and game_path:
+                    try:
+                        gp = Path(game_path)
+                        gp.parent.mkdir(parents=True, exist_ok=True)
+                        gp.write_text(game_content, encoding='utf-8')
+                        new.gameini_path = str(gp)
+                        new.gameini_content = game_content
+                    except Exception as e:
+                        self.status.setText(f'Game.ini write failed: {e}')
+                        QMessageBox.warning(self, 'Game.ini Save Failed', str(e))
                 self._servers.append(new)
                 try:
                     self._save_func(self._servers)
@@ -834,6 +1118,22 @@ if HAVE_QT:
                     except Exception as e:
                         self.status.setText(f'INI write failed: {e}')
                         QMessageBox.warning(self, 'INI Save Failed', str(e))
+                # Optionally write Game.ini for template-based new server
+                game_content = data.get('gameini_content')
+                game_path = data.get('gameini_path')
+                if not game_path and getattr(new, 'ark_path', None):
+                    gpdefault = Path(new.ark_path) / 'ShooterGame' / 'Saved' / 'Config' / 'LinuxServer' / 'Game.ini'
+                    game_path = str(gpdefault)
+                if data.get('write_gameini_on_save') and game_content and game_path:
+                    try:
+                        gp = Path(game_path)
+                        gp.parent.mkdir(parents=True, exist_ok=True)
+                        gp.write_text(game_content, encoding='utf-8')
+                        new.gameini_path = str(gp)
+                        new.gameini_content = game_content
+                    except Exception as e:
+                        self.status.setText(f'Game.ini write failed: {e}')
+                        QMessageBox.warning(self, 'Game.ini Save Failed', str(e))
                 self._servers.append(new)
                 try:
                     self._save_func(self._servers)
@@ -870,6 +1170,22 @@ if HAVE_QT:
                     except Exception as e:
                         self.status.setText(f'INI write failed: {e}')
                         QMessageBox.warning(self, 'INI Save Failed', str(e))
+                # Optionally write Game.ini on edit
+                game_content = data.get('gameini_content')
+                game_path = data.get('gameini_path')
+                if not game_path and getattr(updated, 'ark_path', None):
+                    gpdefault = Path(updated.ark_path) / 'ShooterGame' / 'Saved' / 'Config' / 'LinuxServer' / 'Game.ini'
+                    game_path = str(gpdefault)
+                if data.get('write_gameini_on_save') and game_content and game_path:
+                    try:
+                        gp = Path(game_path)
+                        gp.parent.mkdir(parents=True, exist_ok=True)
+                        gp.write_text(game_content, encoding='utf-8')
+                        updated.gameini_path = str(gp)
+                        updated.gameini_content = game_content
+                    except Exception as e:
+                        self.status.setText(f'Game.ini write failed: {e}')
+                        QMessageBox.warning(self, 'Game.ini Save Failed', str(e))
                 try:
                     self._save_func(self._servers)
                 except Exception as e:
