@@ -1,4 +1,7 @@
 import sys
+import os
+import configparser
+from pathlib import Path
 
 
 # Try to import PyQt6; if unavailable, try PySide6; otherwise fall back to console
@@ -18,8 +21,9 @@ try:
 		QSpinBox,
 		QDialogButtonBox,
 		QMessageBox,
-		QCheckBox,
-		QFileDialog,
+			QCheckBox,
+			QFileDialog,
+			QTextEdit,
 		QListWidget,
 		QHBoxLayout,
 	)
@@ -41,6 +45,10 @@ except Exception:
 			QMessageBox,
 			QListWidget,
 			QHBoxLayout,
+			QCheckBox,
+			QFileDialog,
+			QInputDialog,
+			QTextEdit,
 		)
 		QT_BINDING = "PySide6"
 	except Exception:
@@ -110,6 +118,34 @@ if HAVE_QT:
 				self.ssh_browse.clicked.connect(self.browse_key)
 				layout.addRow(self.ssh_browse)
 
+				self.usersettings_path = QLineEdit(self)
+				layout.addRow("User settings INI path:", self.usersettings_path)
+				self.usersettings_browse = QPushButton("Browse...", self)
+				self.usersettings_browse.clicked.connect(self.browse_usersettings)
+				layout.addRow(self.usersettings_browse)
+
+				self.usersettings_content = QTextEdit(self)
+				self.usersettings_content.setPlaceholderText("Optional contents of userserverettings.ini\n(you can leave blank and provide path only)")
+				layout.addRow("INI content:", self.usersettings_content)
+
+				# Parse / serialize controls for INI content
+				self.parse_btn = QPushButton("Parse INI", self)
+				self.parse_btn.clicked.connect(self.parse_ini)
+				self.serialize_btn = QPushButton("Serialize fields -> INI", self)
+				self.serialize_btn.clicked.connect(self.serialize_from_fields)
+				layout.addRow(self.parse_btn, self.serialize_btn)
+
+				# dynamic area for parsed INI fields
+				self.ini_area = QScrollArea(self)
+				self.ini_container = QWidget(self)
+				self.ini_layout = QVBoxLayout(self.ini_container)
+				self.ini_area.setWidgetResizable(True)
+				self.ini_area.setWidget(self.ini_container)
+				layout.addRow(self.ini_area)
+
+				self.write_ini_on_save = QCheckBox("Write INI file to path on save", self)
+				layout.addRow(self.write_ini_on_save)
+
 				self.ark_path = QLineEdit(self)
 				layout.addRow("ARK path:", self.ark_path)
 
@@ -130,6 +166,8 @@ if HAVE_QT:
 				buttons.rejected.connect(self.reject)
 				layout.addRow(buttons)
 
+				buttons.accepted.connect(self.accept)
+
 				if server:
 					# prefill
 					self.name.setText(getattr(server, "name", ""))
@@ -148,11 +186,145 @@ if HAVE_QT:
 					if getattr(server, "ark_start_params", None):
 						self.ark_start_params.setText(server.ark_start_params)
 					self.autostart.setChecked(bool(getattr(server, "autostart", False)))
+					if getattr(server, "usersettings_path", None):
+						self.usersettings_path.setText(server.usersettings_path)
+					if getattr(server, "usersettings_content", None):
+						self.usersettings_content.setPlainText(server.usersettings_content)
 
 			def browse_key(self):
 				fn, _ = QFileDialog.getOpenFileName(self, "Select SSH private key")
 				if fn:
 					self.ssh_key.setText(fn)
+
+			def browse_usersettings(self):
+				fn, _ = QFileDialog.getOpenFileName(self, "Select userserverettings.ini")
+				if fn:
+					self.usersettings_path.setText(fn)
+					try:
+						with open(fn, "r", encoding="utf-8") as f:
+							self.usersettings_content.setPlainText(f.read())
+					except Exception:
+						# ignore read errors, keep path
+						pass
+
+			def on_accept(self):
+				# Validate required fields before closing
+				name = self.name.text().strip()
+				host = self.host.text().strip()
+				if not name:
+					QMessageBox.critical(self, "Validation", "Name is required")
+					return
+				if not host:
+					QMessageBox.critical(self, "Validation", "Host is required")
+					return
+				ssh_key = self.ssh_key.text().strip()
+				if ssh_key and not os.path.exists(ssh_key):
+					res = QMessageBox.question(self, "SSH key not found", "The SSH key path does not exist. Continue anyway?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+					if res != QMessageBox.StandardButton.Yes:
+						return
+				# all good
+				# ensure fields are serialized back to the INI content before accepting
+				try:
+					self.serialize_from_fields()
+				except Exception:
+					pass
+				self.accept()
+
+			def parse_ini(self):
+				text = self.usersettings_content.toPlainText()
+				if not text.strip():
+					QMessageBox.information(self, "Parse INI", "No INI content to parse")
+					return
+				cfg = configparser.ConfigParser()
+				try:
+					cfg.read_string(text)
+				except configparser.MissingSectionHeaderError:
+					# try wrapping in a default section
+					try:
+						cfg.read_string("[DEFAULT]\n" + text)
+					except Exception as e:
+						QMessageBox.critical(self, "Parse Error", str(e))
+						return
+				# clear previous widgets
+				for i in reversed(range(self.ini_layout.count())):
+					w = self.ini_layout.itemAt(i).widget()
+					if w:
+						w.setParent(None)
+				self.ini_widgets = {}
+				# create widgets per section/option
+				for section in cfg.sections() or ["DEFAULT"]:
+					label = QLabel(f"[{section}]", self)
+					self.ini_layout.addWidget(label)
+					items = cfg[section].items()
+					for opt, val in items:
+						# attempt to detect type
+						v = val
+						if v.lower() in ("true", "false", "yes", "no", "on", "off"):
+							chk = QCheckBox(opt, self)
+							chk.setChecked(v.lower() in ("true", "yes", "on"))
+							self.ini_layout.addWidget(chk)
+							self.ini_widgets[(section, opt)] = chk
+							continue
+						# numeric int
+						try:
+							ival = int(v)
+							hl = QHBoxLayout()
+							lbl = QLabel(opt, self)
+							slider = QSlider()
+							slider.setOrientation(1)  # Qt.Horizontal
+							# heuristic range
+							minv = max(0, ival - 1000)
+							maxv = ival + 1000
+							slider.setRange(minv, maxv)
+							slider.setValue(ival)
+							spin = QSpinBox(self)
+							spin.setRange(minv, maxv)
+							spin.setValue(ival)
+							slider.valueChanged.connect(spin.setValue)
+							spin.valueChanged.connect(slider.setValue)
+							hl.addWidget(lbl)
+							hl.addWidget(slider)
+							hl.addWidget(spin)
+							container = QWidget(self)
+							container.setLayout(hl)
+							self.ini_layout.addWidget(container)
+							self.ini_widgets[(section, opt)] = spin
+							continue
+						except Exception:
+							pass
+						# fallback to text
+						le = QLineEdit(self)
+						le.setText(v)
+						self.ini_layout.addWidget(QLabel(opt, self))
+						self.ini_layout.addWidget(le)
+						self.ini_widgets[(section, opt)] = le
+				# done
+				QMessageBox.information(self, "Parse INI", "Parsed INI into editable fields")
+
+			def serialize_from_fields(self):
+				# build config from widgets
+				cfg = configparser.ConfigParser()
+				for (section, opt), widget in getattr(self, 'ini_widgets', {}).items():
+					if isinstance(widget, QCheckBox):
+						val = str(widget.isChecked())
+					elif isinstance(widget, QSpinBox):
+						val = str(widget.value())
+					elif isinstance(widget, QLineEdit):
+						val = widget.text()
+					else:
+						# QTextEdit or others
+						try:
+							val = widget.toPlainText()
+						except Exception:
+							val = str(widget)
+					if section not in cfg:
+						cfg[section] = {}
+					cfg[section][opt] = val
+				# write to string
+				from io import StringIO
+				s = StringIO()
+				cfg.write(s)
+				self.usersettings_content.setPlainText(s.getvalue())
 
 			def get_data(self):
 				return {
@@ -166,6 +338,9 @@ if HAVE_QT:
 					"systemd_unit": self.systemd_unit.text().strip() or None,
 					"ark_start_params": self.ark_start_params.text().strip() or None,
 					"autostart": bool(self.autostart.isChecked()),
+					"usersettings_path": self.usersettings_path.text().strip() or None,
+					"usersettings_content": self.usersettings_content.toPlainText().strip() or None,
+					"write_ini_on_save": bool(self.write_ini_on_save.isChecked()),
 				}
 
 
@@ -192,6 +367,24 @@ if HAVE_QT:
 			self.refresh_btn = QPushButton("Refresh", self)
 			self.refresh_btn.clicked.connect(self.load_server_list)
 			btns_v.addWidget(self.refresh_btn)
+
+			self.add_btn = QPushButton("Add", self)
+			self.add_btn.clicked.connect(self.on_add)
+			btns_v.addWidget(self.add_btn)
+
+			self.template_btn = QPushButton("New (Template)", self)
+			self.template_btn.clicked.connect(self.on_new_from_template)
+			btns_v.addWidget(self.template_btn)
+
+			self.edit_btn = QPushButton("Edit", self)
+			self.edit_btn.clicked.connect(self.on_edit)
+			self.edit_btn.setEnabled(False)
+			btns_v.addWidget(self.edit_btn)
+
+			self.delete_btn = QPushButton("Delete", self)
+			self.delete_btn.clicked.connect(self.on_delete)
+			self.delete_btn.setEnabled(False)
+			btns_v.addWidget(self.delete_btn)
 
 			self.connect_btn = QPushButton("Connect via SSH", self)
 			self.connect_btn.clicked.connect(self.on_connect)
@@ -225,17 +418,19 @@ if HAVE_QT:
 			# when executed as a module (python -m src.alsm.main) and when
 			# executed directly from the `src/alsm` folder (python main.py).
 			try:
-				from src.alsm.servers import load_servers
+				from src.alsm.servers import load_servers, save_servers, Server
 			except Exception:
 				try:
 					# when running from src/alsm as a script
-					from servers import load_servers
+					from servers import load_servers, save_servers, Server
 				except Exception:
 					# when running as a package (relative import)
-					from .servers import load_servers
+					from .servers import load_servers, save_servers, Server
 
 			self._servers = []
 			self._load_func = load_servers
+			self._save_func = save_servers
+			self._Server = Server
 			self.load_server_list()
 
 		def on_connect(self):
@@ -335,9 +530,122 @@ if HAVE_QT:
 			for s in self._servers:
 				self.servers_list.addItem(f"{s.name} — {s.host}:{s.port}")
 
+		def on_add(self):
+			dlg = ServerEditorDialog(self)
+			if dlg.exec() == QDialog.DialogCode.Accepted:
+				data = dlg.get_data()
+				try:
+					new = self._Server.from_dict(data)
+				except Exception:
+					new = self._Server(**data)
+				self._servers.append(new)
+				try:
+					self._save_func(self._servers)
+				except Exception as e:
+					self.status.setText(f"Save failed: {e}")
+				# optionally write INI file to disk
+				if data.get("write_ini_on_save") and data.get("usersettings_path") and data.get("usersettings_content"):
+					try:
+						p = Path(data.get("usersettings_path"))
+						p.parent.mkdir(parents=True, exist_ok=True)
+						p.write_text(data.get("usersettings_content"), encoding="utf-8")
+					except Exception as e:
+						self.status.setText(f"INI write failed: {e}")
+						QMessageBox.warning(self, "INI Save Failed", str(e))
+				self.load_server_list()
+
+			def on_new_from_template(self):
+				# create a reasonable ARK Pre-Aquatic template
+				tpl = {
+					"name": "New ARK Pre-Aquatic Server",
+					"host": "127.0.0.1",
+					"port": 22,
+					"username": "ark",
+					"autostart": False,
+					"ark_path": "/home/ark/server",
+					"systemd_unit": None,
+					"map": "TheIsland_P",
+					"ark_start_params": "-server -log -noBattlEye",
+					"usersettings_content": "[ServerSettings]\nServerAdminPassword=\nMaxPlayers=70\nQueryPort=27015\nPort=7777\n",
+					"usersettings_path": None,
+					"ssh_key_path": None,
+				}
+
+				# open editor prefilled
+				tmp = self._Server.from_dict(tpl)
+				dlg = ServerEditorDialog(self, server=tmp)
+				if dlg.exec() == QDialog.DialogCode.Accepted:
+					data = dlg.get_data()
+					try:
+						new = self._Server.from_dict(data)
+					except Exception:
+						new = self._Server(**data)
+					self._servers.append(new)
+					try:
+						self._save_func(self._servers)
+					except Exception as e:
+						self.status.setText(f"Save failed: {e}")
+					# optionally write INI
+					if data.get("write_ini_on_save") and data.get("usersettings_path") and data.get("usersettings_content"):
+						try:
+							p = Path(data.get("usersettings_path"))
+							p.parent.mkdir(parents=True, exist_ok=True)
+							p.write_text(data.get("usersettings_content"), encoding="utf-8")
+						except Exception as e:
+							self.status.setText(f"INI write failed: {e}")
+							QMessageBox.warning(self, "INI Save Failed", str(e))
+					self.load_server_list()
+
+		def on_edit(self):
+			if not (self.servers_list.selectedItems()):
+				return
+			idx = self.servers_list.currentRow()
+			server = self._servers[idx]
+			dlg = ServerEditorDialog(self, server=server)
+			if dlg.exec() == QDialog.DialogCode.Accepted:
+				data = dlg.get_data()
+				try:
+					updated = self._Server.from_dict(data)
+				except Exception:
+					updated = self._Server(**data)
+				self._servers[idx] = updated
+				try:
+					self._save_func(self._servers)
+				except Exception as e:
+					self.status.setText(f"Save failed: {e}")
+				# optionally write INI file to disk
+				if data.get("write_ini_on_save") and data.get("usersettings_path") and data.get("usersettings_content"):
+					try:
+						p = Path(data.get("usersettings_path"))
+						p.parent.mkdir(parents=True, exist_ok=True)
+						p.write_text(data.get("usersettings_content"), encoding="utf-8")
+					except Exception as e:
+						self.status.setText(f"INI write failed: {e}")
+						QMessageBox.warning(self, "INI Save Failed", str(e))
+				self.load_server_list()
+
+		def on_delete(self):
+			if not (self.servers_list.selectedItems()):
+				return
+			idx = self.servers_list.currentRow()
+			server = self._servers[idx]
+			res = QMessageBox.question(self, "Delete", f"Delete server '{server.name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+			if res == QMessageBox.StandardButton.Yes:
+				del self._servers[idx]
+				try:
+					self._save_func(self._servers)
+				except Exception as e:
+					self.status.setText(f"Save failed: {e}")
+				self.load_server_list()
+
 		def on_selection_changed(self):
 			has = bool(self.servers_list.selectedItems())
 			self.connect_btn.setEnabled(has)
+			self.edit_btn.setEnabled(has)
+			self.delete_btn.setEnabled(has)
+			self.start_btn.setEnabled(has)
+			self.stop_btn.setEnabled(has)
+			self.backup_btn.setEnabled(has)
 
 
 	def gui_main():

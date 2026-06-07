@@ -17,6 +17,8 @@ class Server:
     systemd_unit: Optional[str] = None
     map: Optional[str] = None
     ark_start_params: Optional[str] = None
+    usersettings_path: Optional[str] = None
+    usersettings_content: Optional[str] = None
 
     def to_dict(self):
         return asdict(self)
@@ -35,6 +37,8 @@ class Server:
             systemd_unit=d.get("systemd_unit"),
             map=d.get("map"),
             ark_start_params=d.get("ark_start_params"),
+            usersettings_path=d.get("usersettings_path"),
+            usersettings_content=d.get("usersettings_content"),
         )
 
 
