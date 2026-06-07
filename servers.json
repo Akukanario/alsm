@@ -1,0 +1,10 @@
+[
+  {
+    "name": "Example ARK Server",
+    "host": "192.168.1.100",
+    "port": 22,
+    "username": "root",
+    "autostart": false,
+    "ark_path": "/home/ark/server"
+  }
+]
