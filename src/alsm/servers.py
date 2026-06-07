@@ -13,6 +13,10 @@ class Server:
     password: Optional[str] = None
     autostart: bool = False
     ark_path: Optional[str] = None
+    ssh_key_path: Optional[str] = None
+    systemd_unit: Optional[str] = None
+    map: Optional[str] = None
+    ark_start_params: Optional[str] = None
 
     def to_dict(self):
         return asdict(self)
@@ -27,6 +31,10 @@ class Server:
             password=d.get("password"),
             autostart=bool(d.get("autostart", False)),
             ark_path=d.get("ark_path"),
+            ssh_key_path=d.get("ssh_key_path"),
+            systemd_unit=d.get("systemd_unit"),
+            map=d.get("map"),
+            ark_start_params=d.get("ark_start_params"),
         )
 
 

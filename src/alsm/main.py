@@ -1,8 +1,9 @@
 import sys
 
 
-# Try to import PyQt6; if unavailable, fall back to a console message
+# Try to import PyQt6; if unavailable, try PySide6; otherwise fall back to console
 HAVE_QT = True
+QT_BINDING = None
 try:
 	from PyQt6.QtWidgets import (
 		QApplication,
@@ -17,11 +18,33 @@ try:
 		QSpinBox,
 		QDialogButtonBox,
 		QMessageBox,
+		QCheckBox,
+		QFileDialog,
 		QListWidget,
 		QHBoxLayout,
 	)
+	QT_BINDING = "PyQt6"
 except Exception:
-	HAVE_QT = False
+	try:
+		from PySide6.QtWidgets import (
+			QApplication,
+			QMainWindow,
+			QWidget,
+			QVBoxLayout,
+			QLabel,
+			QPushButton,
+			QDialog,
+			QFormLayout,
+			QLineEdit,
+			QSpinBox,
+			QDialogButtonBox,
+			QMessageBox,
+			QListWidget,
+			QHBoxLayout,
+		)
+		QT_BINDING = "PySide6"
+	except Exception:
+		HAVE_QT = False
 
 
 if HAVE_QT:
@@ -59,6 +82,91 @@ if HAVE_QT:
 				"username": self.username.text().strip(),
 				"password": self.password.text(),
 			}
+
+
+		class ServerEditorDialog(QDialog):
+			def __init__(self, parent=None, server=None):
+				super().__init__(parent)
+				self.setWindowTitle("Server Editor")
+				layout = QFormLayout(self)
+
+				self.name = QLineEdit(self)
+				layout.addRow("Name:", self.name)
+
+				self.host = QLineEdit(self)
+				layout.addRow("Host:", self.host)
+
+				self.port = QSpinBox(self)
+				self.port.setRange(1, 65535)
+				self.port.setValue(22)
+				layout.addRow("Port:", self.port)
+
+				self.username = QLineEdit(self)
+				layout.addRow("Username:", self.username)
+
+				self.ssh_key = QLineEdit(self)
+				layout.addRow("SSH key path:", self.ssh_key)
+				self.ssh_browse = QPushButton("Browse...", self)
+				self.ssh_browse.clicked.connect(self.browse_key)
+				layout.addRow(self.ssh_browse)
+
+				self.ark_path = QLineEdit(self)
+				layout.addRow("ARK path:", self.ark_path)
+
+				self.map = QLineEdit(self)
+				layout.addRow("Map:", self.map)
+
+				self.systemd_unit = QLineEdit(self)
+				layout.addRow("systemd unit:", self.systemd_unit)
+
+				self.ark_start_params = QLineEdit(self)
+				layout.addRow("Start params:", self.ark_start_params)
+
+				self.autostart = QCheckBox(self)
+				layout.addRow("Autostart:", self.autostart)
+
+				buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self)
+				buttons.accepted.connect(self.accept)
+				buttons.rejected.connect(self.reject)
+				layout.addRow(buttons)
+
+				if server:
+					# prefill
+					self.name.setText(getattr(server, "name", ""))
+					self.host.setText(getattr(server, "host", ""))
+					self.port.setValue(getattr(server, "port", 22))
+					if getattr(server, "username", None):
+						self.username.setText(server.username)
+					if getattr(server, "ssh_key_path", None):
+						self.ssh_key.setText(server.ssh_key_path)
+					if getattr(server, "ark_path", None):
+						self.ark_path.setText(server.ark_path)
+					if getattr(server, "map", None):
+						self.map.setText(server.map)
+					if getattr(server, "systemd_unit", None):
+						self.systemd_unit.setText(server.systemd_unit)
+					if getattr(server, "ark_start_params", None):
+						self.ark_start_params.setText(server.ark_start_params)
+					self.autostart.setChecked(bool(getattr(server, "autostart", False)))
+
+			def browse_key(self):
+				fn, _ = QFileDialog.getOpenFileName(self, "Select SSH private key")
+				if fn:
+					self.ssh_key.setText(fn)
+
+			def get_data(self):
+				return {
+					"name": self.name.text().strip(),
+					"host": self.host.text().strip(),
+					"port": int(self.port.value()),
+					"username": self.username.text().strip(),
+					"ssh_key_path": self.ssh_key.text().strip() or None,
+					"ark_path": self.ark_path.text().strip() or None,
+					"map": self.map.text().strip() or None,
+					"systemd_unit": self.systemd_unit.text().strip() or None,
+					"ark_start_params": self.ark_start_params.text().strip() or None,
+					"autostart": bool(self.autostart.isChecked()),
+				}
 
 
 	class MainWindow(QMainWindow):
@@ -113,7 +221,18 @@ if HAVE_QT:
 			layout.addWidget(self.status)
 
 			# load servers from config
-			from src.alsm.servers import load_servers
+			# Try to import `load_servers` flexibly so the script runs both
+			# when executed as a module (python -m src.alsm.main) and when
+			# executed directly from the `src/alsm` folder (python main.py).
+			try:
+				from src.alsm.servers import load_servers
+			except Exception:
+				try:
+					# when running from src/alsm as a script
+					from servers import load_servers
+				except Exception:
+					# when running as a package (relative import)
+					from .servers import load_servers
 
 			self._servers = []
 			self._load_func = load_servers
@@ -231,7 +350,12 @@ else:
 	def console_main():
 		print("PyQt6 is not available in the current environment.")
 		print("To enable the GUI, install PyQt6 and PyQt6-sip in the project's virtualenv:")
-		print("\n    . \.venv\\Scripts\\Activate.ps1")
+		print(r"\n  Windows (PowerShell):")
+		print(r"    . \.venv\\Scripts\\Activate.ps1")
+		print(r"    pip install PyQt6 PyQt6-sip\n")
+		print("  Linux / macOS:")
+		print("    python3 -m venv .venv")
+		print("    . .venv/bin/activate")
 		print("    pip install PyQt6 PyQt6-sip\n")
 		print("The script can also be extended to run in console mode; for now it exits.")
 
