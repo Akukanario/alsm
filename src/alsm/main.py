@@ -357,6 +357,166 @@ if HAVE_QT:
             else:
                 return
 
+        def _run_action(self, action_name: str):
+            if not (hasattr(self, 'servers_list') and self.servers_list.selectedItems()):
+                self.status.setText('No server selected')
+                return
+            idx = self.servers_list.currentRow()
+            server = self._servers[idx]
+            from src.alsm import runner
+            pwd = None
+            # if remote and username exists, ask for password (simple prompt)
+            if not runner.is_local(getattr(server, 'host', '')) and getattr(server, 'username', None):
+                try:
+                    from PyQt6.QtWidgets import QInputDialog
+                    pw, ok = QInputDialog.getText(self, 'SSH Password', f'Password for {server.username}@{server.host}', QLineEdit.EchoMode.Password)
+                    if ok and pw:
+                        pwd = pw
+                except Exception:
+                    pwd = None
+
+            def _cb(res):
+                code, out, err = res
+                text = f"{action_name}: exit={code}"
+                if out:
+                    text += f" out={out.strip()}"
+                if err:
+                    text += f" err={err.strip()}"
+                QTimer.singleShot(0, lambda: self.status.setText(text))
+
+            self.status.setText(f'{action_name} running...')
+            runner.run_in_thread(getattr(runner, f"{action_name.lower()}_server"), args=(server, pwd), callback=_cb)
+
+        def on_start(self):
+            self._run_action('Start')
+
+        def on_stop(self):
+            self._run_action('Stop')
+
+        def on_backup(self):
+            self._run_action('Backup')
+
+        def load_server_list(self):
+            try:
+                self._servers = self._load_func()
+            except Exception as e:
+                self._servers = []
+                self.status.setText(f'Failed to load servers: {e}')
+            self.servers_list.clear()
+            for s in self._servers:
+                self.servers_list.addItem(f"{s.name} — {s.host}:{s.port}")
+
+        def on_add(self):
+            dlg = ServerEditorDialog(self)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                data = dlg.get_data()
+                try:
+                    new = self._Server.from_dict(data)
+                except Exception:
+                    new = self._Server(**data)
+                self._servers.append(new)
+                try:
+                    self._save_func(self._servers)
+                except Exception as e:
+                    self.status.setText(f'Save failed: {e}')
+                if data.get('write_ini_on_save') and data.get('usersettings_path') and data.get('usersettings_content'):
+                    try:
+                        p = Path(data.get('usersettings_path'))
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_text(data.get('usersettings_content'), encoding='utf-8')
+                    except Exception as e:
+                        self.status.setText(f'INI write failed: {e}')
+                        QMessageBox.warning(self, 'INI Save Failed', str(e))
+                self.load_server_list()
+
+        def on_new_from_template(self):
+            tpl = {
+                'name': 'New ARK Pre-Aquatic Server',
+                'host': '127.0.0.1',
+                'port': 22,
+                'username': 'ark',
+                'autostart': False,
+                'ark_path': '/home/ark/server',
+                'systemd_unit': None,
+                'map': 'TheIsland_P',
+                'ark_start_params': '-server -log -noBattlEye',
+                'usersettings_content': '[ServerSettings]\nServerAdminPassword=\nMaxPlayers=70\nQueryPort=27015\nPort=7777\n',
+                'usersettings_path': None,
+                'ssh_key_path': None,
+            }
+            tmp = self._Server.from_dict(tpl)
+            dlg = ServerEditorDialog(self, server=tmp)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                data = dlg.get_data()
+                try:
+                    new = self._Server.from_dict(data)
+                except Exception:
+                    new = self._Server(**data)
+                self._servers.append(new)
+                try:
+                    self._save_func(self._servers)
+                except Exception as e:
+                    self.status.setText(f'Save failed: {e}')
+                if data.get('write_ini_on_save') and data.get('usersettings_path') and data.get('usersettings_content'):
+                    try:
+                        p = Path(data.get('usersettings_path'))
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_text(data.get('usersettings_content'), encoding='utf-8')
+                    except Exception as e:
+                        self.status.setText(f'INI write failed: {e}')
+                        QMessageBox.warning(self, 'INI Save Failed', str(e))
+                self.load_server_list()
+
+        def on_edit(self):
+            if not (self.servers_list.selectedItems()):
+                return
+            idx = self.servers_list.currentRow()
+            server = self._servers[idx]
+            dlg = ServerEditorDialog(self, server=server)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                data = dlg.get_data()
+                try:
+                    updated = self._Server.from_dict(data)
+                except Exception:
+                    updated = self._Server(**data)
+                self._servers[idx] = updated
+                try:
+                    self._save_func(self._servers)
+                except Exception as e:
+                    self.status.setText(f'Save failed: {e}')
+                if data.get('write_ini_on_save') and data.get('usersettings_path') and data.get('usersettings_content'):
+                    try:
+                        p = Path(data.get('usersettings_path'))
+                        p.parent.mkdir(parents=True, exist_ok=True)
+                        p.write_text(data.get('usersettings_content'), encoding='utf-8')
+                    except Exception as e:
+                        self.status.setText(f'INI write failed: {e}')
+                        QMessageBox.warning(self, 'INI Save Failed', str(e))
+                self.load_server_list()
+
+        def on_delete(self):
+            if not (self.servers_list.selectedItems()):
+                return
+            idx = self.servers_list.currentRow()
+            server = self._servers[idx]
+            res = QMessageBox.question(self, 'Delete', f"Delete server '{server.name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if res == QMessageBox.StandardButton.Yes:
+                del self._servers[idx]
+                try:
+                    self._save_func(self._servers)
+                except Exception as e:
+                    self.status.setText(f'Save failed: {e}')
+                self.load_server_list()
+
+        def on_selection_changed(self):
+            has = bool(self.servers_list.selectedItems())
+            self.connect_btn.setEnabled(has)
+            self.edit_btn.setEnabled(has)
+            self.delete_btn.setEnabled(has)
+            self.start_btn.setEnabled(has)
+            self.stop_btn.setEnabled(has)
+            self.backup_btn.setEnabled(has)
+
 
     def gui_main():
         app = QApplication(sys.argv)
